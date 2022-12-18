@@ -11,7 +11,7 @@ use rocket::response::Redirect;
 use log::{error, info, warn};
 
 #[get("/?<day>&<month>")]
-async fn get_data(day: u8, month: u8) -> Result<NamedFile, String> {
+async fn get_data(day: u8, month: u8) -> Result<Redirect, String> {
     info!("Incoming request for {}.{}", day, month);
     if day > 31 || month > 12 {
         warn!("Invalid date: {}/{}", day, month);
@@ -38,9 +38,11 @@ async fn get_data(day: u8, month: u8) -> Result<NamedFile, String> {
         if file_age.num_minutes() < 10 {
             // Return the file
             info!("Returning cached data for {}", date);
-            return Ok(NamedFile::open(&filename_pdf)
+            // Move the file to /static/display.pdf
+            rocket::tokio::fs::rename(&filename_pdf, "./static/display.pdf")
                 .await
-                .expect("Error while opening file"));
+                .expect("Error while moving file");
+            return Ok(Redirect::to("/static/"));
         } else {
             // Delete the file
             info!("Deleting old cached data for {}", date);
@@ -78,10 +80,12 @@ async fn get_data(day: u8, month: u8) -> Result<NamedFile, String> {
             Err(err) => return Err(format!("Error while writing file: {}", err)),
         };
 
-        // Return the PDF
-        Ok(NamedFile::open(&filename_pdf)
+        // Move the file to /static/display.pdf
+        rocket::tokio::fs::rename(&filename_pdf, "./static/display.pdf")
             .await
-            .expect("Error while opening file"))
+            .expect("Error while moving file");
+        // Redirect to /static/
+        Ok(Redirect::to("/static/"))
     } else if response.status() == 404 {
         warn!("No data for {}", date);
         // If the server returns a 404 status code
@@ -98,7 +102,7 @@ async fn get_data(day: u8, month: u8) -> Result<NamedFile, String> {
 }
 
 #[get("/?<when>")]
-async fn auto_get_data(when: String) -> Result<NamedFile, String> {
+async fn auto_get_data(when: String) -> Result<Redirect, String> {
     // Get current date
     let current_date = if when == "tomorrow" {
         // If it's friday or saturday return message
@@ -147,11 +151,12 @@ async fn auto_get_data(when: String) -> Result<NamedFile, String> {
                     .expect("Error while getting file modified date"),
             );
         if file_age.num_minutes() < 10 {
-            // Return the file
-            info!("Returning cached data for {}", date);
-            return Ok(NamedFile::open(&filename_pdf)
+            // Redirect
+            // Move the file to /static/display.pdf
+            rocket::tokio::fs::rename(&filename_pdf, "./static/display.pdf")
                 .await
-                .expect("Error while opening file"));
+                .expect("Error while moving file");
+            return Ok(Redirect::to("/static/"));
         } else {
             // Delete the file
             info!("Deleting old cached data for {}", date);
@@ -189,9 +194,15 @@ async fn auto_get_data(when: String) -> Result<NamedFile, String> {
             Err(err) => return Err(format!("Error while writing file: {}", err)),
         };
 
-        // Return the file
+        // Redirect
         match NamedFile::open(&filename_pdf).await {
-            Ok(file) => Ok(file),
+            Ok(_) => {
+                // Move the file to /static/display.pdf
+                rocket::tokio::fs::rename(&filename_pdf, "./static/display.pdf")
+                    .await
+                    .expect("Error while moving file");
+                Ok(Redirect::to("/static/"))
+            }
             Err(err) => Err(format!("Error while opening file: {}", err)),
         }
     } else if response.status() == 404 {
@@ -235,7 +246,7 @@ async fn launch() -> _ {
     // Start the server
     rocket::build()
         // Static files
-        .mount("/public", FileServer::from("./static/"))
+        .mount("/static", FileServer::from("./static/"))
         .mount("/", routes![get_data])
         .mount("/auto/", routes![auto_get_data])
         .mount("/status/", routes![status])
